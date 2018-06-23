@@ -22,6 +22,11 @@ DirectX SDKをお使いのコンピューターにインストールしてくだ
 gitコマンドを使ってcloneして生成されたフォルダの中の
 ソリューションファイルをVisual Studio 2017で開いて下さい。
 まずはビルドしてください。  
+XAudio2SampleCallback.cppにあるPLAY_MODEのマクロの値で再生方法切り替わります。  
+
+0: 直接MMIOを操作してwaveファイルを再生  
+1: WaveOperatorクラスを介してwaveファイルを操作して再生  
+
 exeが生成されたらexeと同じフォルダに再生させたいwavファイルを  
 test.wavという名前で設置してください。  
 その後exeを実行すると黒いウインドウが表示された後に再生されるはずです。
