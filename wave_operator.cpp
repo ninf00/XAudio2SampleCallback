@@ -19,6 +19,7 @@ WaveOperator::WaveOperator()
 	format = NULL;
 	mmio = NULL;
 	size = 0;
+	isReadingFromMemory = FALSE;
 }
 
 //---------------------------------------------------------------------------------------
@@ -35,7 +36,7 @@ WaveOperator::~WaveOperator()
 // Name: WaveOperator::Open()
 // Desc: 読み込み専用でファイルを開く
 //---------------------------------------------------------------------------------------
-HRESULT WaveOperator::Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag)
+HRESULT WaveOperator::Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag, bool isBuffered)
 {
 	HRESULT hr;
 	modeFlag = flag;
@@ -49,7 +50,11 @@ HRESULT WaveOperator::Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag)
 		SAFE_DELETE_ARRAY( format );
 
 		mmioinfo = { 0 };
-		mmio = mmioOpen(strFileName, &mmioinfo, MMIO_READ);
+		// バッファーフラグに応じて開き方切り替え
+		if(isBuffered)
+			mmio = mmioOpen(strFileName, &mmioinfo, MMIO_ALLOCBUF | MMIO_READ);
+		else
+			mmio = mmioOpen(strFileName, &mmioinfo, MMIO_READ);
 		if (!mmio)
 			return E_FAIL;
 
@@ -73,6 +78,25 @@ HRESULT WaveOperator::Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag)
 	}
 
 	return hr;
+}
+
+//---------------------------------------------------------------------------------------
+// Name: WaveOperator::OpenFromMemory()
+// Desc: メモリーからメンバー変数を読み込む
+//---------------------------------------------------------------------------------------
+HRESULT WaveOperator::OpenFromMemory(BYTE* data, ULONG dataSize, WAVEFORMATEX* format, DWORD flag)
+{
+	// データをコピーする
+	format = format;
+	memoryData = data;
+	memoryDataSize = dataSize;
+	memoryDataCur = memoryData;
+	isReadingFromMemory = TRUE;
+
+	if (flag != WAVEFILE_READ)
+		return E_NOTIMPL;
+	
+	return S_OK;
 }
 
 //---------------------------------------------------------------------------------------
@@ -170,23 +194,30 @@ DWORD WaveOperator::GetSize()
 //---------------------------------------------------------------------------------------
 HRESULT WaveOperator::ResetFile()
 {
-	if (mmio == NULL)
-		return E_FAIL;
-
-	if (modeFlag == WAVEFILE_READ)
+	if (isReadingFromMemory)
 	{
-		// データをシークする
-		if (-1 == mmioSeek(mmio, riffChunk.dwDataOffset + sizeof(FOURCC), SEEK_SET))
-			return E_FAIL;
-
-		// 'data'チャンクを探す
-		chunk.ckid = mmioFOURCC('d', 'a', 't', 'a');
-		if (0 != mmioDescend(mmio, &chunk, &riffChunk, MMIO_FINDCHUNK))
-			return E_FAIL;
+		memoryDataCur = memoryData;
 	}
 	else
 	{
-		return E_FAIL;
+		if (mmio == NULL)
+			return E_FAIL;
+
+		if (modeFlag == WAVEFILE_READ)
+		{
+			// データをシークする
+			if (-1 == mmioSeek(mmio, riffChunk.dwDataOffset + sizeof(FOURCC), SEEK_SET))
+				return E_FAIL;
+
+			// 'data'チャンクを探す
+			chunk.ckid = mmioFOURCC('d', 'a', 't', 'a');
+			if (0 != mmioDescend(mmio, &chunk, &riffChunk, MMIO_FINDCHUNK))
+				return E_FAIL;
+		}
+		else
+		{
+			return E_FAIL;
+		}
 	}
 
 	return S_OK;
@@ -198,7 +229,84 @@ HRESULT WaveOperator::ResetFile()
 //---------------------------------------------------------------------------------------
 HRESULT WaveOperator::Read(BYTE* buffer, DWORD size, DWORD* readSize)
 {
-	return E_FAIL;
+	if (isReadingFromMemory)
+	{
+		// メモリ用カーソルチェック
+		if (memoryDataCur == NULL)
+			return CO_E_NOTINITIALIZED;
+		// 読み取ったサイズのポインタ初期化
+		if (readSize != NULL)
+			*readSize = 0;
+		// 読み取るサイズをチェック
+		if ((BYTE*)(memoryDataCur + size) > (BYTE*)(memoryData + memoryDataSize))
+		{
+			size = memoryDataSize - (DWORD)(memoryDataCur - memoryData);
+		}
+
+		// メモリから読み取ったファイルデータをバッファーにコピー
+#pragma warning( disable: 4616 )
+#pragma warning( diable: 22104 )
+		CopyMemory(buffer, memoryDataCur, size);
+#pragma warning( default: 22104 )
+#pragma warning( default: 4616 )
+
+		// 読み取ったサイズを更新
+		if (readSize != NULL)
+			*readSize = size;
+
+		return S_OK;
+	}
+	else
+	{
+		MMIOINFO mmioinfoIn; // mmioの現在のステータスを格納
+
+		if (mmio == NULL)
+			return CO_E_NOTINITIALIZED;
+		// 引数チェック
+		if (buffer == NULL || readSize == NULL)
+			return E_INVALIDARG;
+
+		*readSize = 0;
+
+		// mmioの情報を取得
+		if (0 != mmioGetInfo(mmio, &mmioinfoIn, 0))
+			return E_FAIL;
+
+		// 読み取るデータのサイズ確認
+		UINT cbDataIn = size;
+		if (cbDataIn > chunk.cksize)
+			cbDataIn = chunk.cksize;
+
+		chunk.cksize -= cbDataIn;
+
+		// ファイル内容を読み込む
+		for (DWORD cT = 0; cT < cbDataIn; cT++)
+		{
+			// ファイルの終わりかチェック
+			if (mmioinfoIn.pchNext == mmioinfoIn.pchEndRead)
+			{
+				// 入出力用バッファを進める
+				if (0 != mmioAdvance(mmio, &mmioinfoIn, MMIO_READ))
+					return E_FAIL;
+				if (mmioinfoIn.pchNext == mmioinfoIn.pchEndRead)
+					return E_FAIL;
+			}
+
+			// 実際にファイル内容をバッファにコピー
+			*((BYTE*)buffer + cT) = *((BYTE*)mmioinfoIn.pchNext);
+			mmioinfoIn.pchNext++;
+
+		}
+
+		// ファイル情報を書き込む
+		if (0 != mmioSetInfo(mmio, &mmioinfoIn, 0))
+			return E_FAIL;
+
+		// 読み込んだサイズをセット
+		*readSize = cbDataIn;
+
+		return S_OK;
+	}
 }
 
 //---------------------------------------------------------------------------------------

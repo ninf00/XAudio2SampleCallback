@@ -28,6 +28,10 @@ public:
 	MMRESULT ret;
 	DWORD size;
 	DWORD modeFlag;
+	BOOL isReadingFromMemory;
+	ULONG memoryDataSize;
+	BYTE* memoryData;
+	BYTE* memoryDataCur;
 
 protected:
 	HRESULT ReadMMIO();
@@ -39,7 +43,9 @@ public:
 	// デストラクター
 	~WaveOperator();
 	// ファイルを開く
-	HRESULT Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag);
+	HRESULT Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag, bool isBuffered = false);
+	// メモリからファイルを開く
+	HRESULT OpenFromMemory(BYTE* data, ULONG dataSize, WAVEFORMATEX* format, DWORD flag);
     // ファイルを閉じる
 	HRESULT Close();
 	// ファイルを読み込む
