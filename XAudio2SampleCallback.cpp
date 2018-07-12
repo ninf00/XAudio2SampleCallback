@@ -462,6 +462,8 @@ int playMediaWaveOperatorWithThread()
 		SAFE_DELETE_ARRAY(seWaveBuffer);
 		return -1;
 	}
+	// ボリュームを半分にセット
+	seSourceVoice->SetVolume(0.5f);
 
 	// SE用のstructure構築
 	PlaySeData seAudioData = { 0 };
@@ -476,6 +478,9 @@ int playMediaWaveOperatorWithThread()
 	audioData->isPlayed = false;
 	audioData->audioEngine = audio;
 
+	// ユーザーの入力を待つ
+	getchar();
+
 	int loopCount = 0;
 	// ゲーム用ループを想定
 	while (!audioData->isPlayed)
@@ -487,9 +492,21 @@ int playMediaWaveOperatorWithThread()
 			std::thread t(PlayeAudioStream, audioData);
 			t.detach();
 		}
-		// ループ100回ごとにSE鳴らす
-		if (loopCount % 100 == 0)
-			playSe(&seAudioData);
+		// ループ100000回を境にSE鳴らすタイミング切り替え
+		// 100000回以下 -> 1000回毎
+		// 100000回以上 -> 25000回毎
+		if (loopCount <= 100000)
+		{
+			// ループ1000回ごとにSE鳴らす
+			if (loopCount % 1000 == 0)
+				playSe(&seAudioData);
+		}
+		else
+		{
+			// ループ25000回ごとにSE鳴らす
+			if (loopCount % 25000 == 0)
+				playSe(&seAudioData);
+		}
 
 		printf("count: %d\r", loopCount);
 		loopCount++;
@@ -663,13 +680,18 @@ void playSe(PlaySeData* audioData)
 	}
 
 	//----------------------------------------------
-	// キューの中身をチェックしてまだ残ってたら追加しない
+	// キューの中身をチェックしてまだ残ってた場合
+	// 1. ボイスを停止する
+	// 2. バッファーをフラッシュして空にする
+	// 3. ボイスを再生する
 	//----------------------------------------------
 	XAUDIO2_VOICE_STATE state;
 	audioData->sourceVoice->GetState(&state);
 	if (state.BuffersQueued > 0)
 	{
-		return;
+		audioData->sourceVoice->Stop();
+		audioData->sourceVoice->FlushSourceBuffers();
+		audioData->sourceVoice->Start();
 	}
 
 	// バッファーを生成する
