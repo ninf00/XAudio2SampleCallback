@@ -75,8 +75,8 @@ HRESULT OggOperator::Open(LPWSTR strFileName, WAVEFORMATEX* format, DWORD flag, 
 		// セットした情報使ってフォーマットファイル作成
 		if (!GenerateWaveFormatEx())
 			return E_FAIL;
-		// サイズは一旦1M固定で暫定対応
-		size = OggOperatorNS::pcmSize;
+		// サイズを計算して入れておく
+		size = info->channels * 2 * ov_pcm_total(&ovf, -1);
 	}
 	else
 	{
