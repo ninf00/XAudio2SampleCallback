@@ -19,7 +19,7 @@ Ogg Vorbisライブラリをインストールしてください。
 
 - [Ogg Vorbis](https://www.xiph.org/downloads/)
 
-インストール方法とライブラリのビルド方法など
+インストール方法とライブラリのビルド方法など  
 http://marupeke296.com/OGG_No1_LibraryInstall.html
 
 上記手順を行うと最終的に
